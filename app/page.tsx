@@ -76,7 +76,9 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(
+          errorData.error || `HTTP error! status: ${response.status}`
+        );
       }
 
       const data = await response.json();
@@ -137,9 +139,7 @@ export default function Home() {
 
         <div className="mt-6 md:mt-8 w-full max-w-2xl">
           <div className="flex flex-wrap justify-center gap-4">
-            {playlist.length > 0 ? (
-              <p>Playlist generated</p>
-            ) : (
+            {playlist.length > 0 ? null : (
               <div className="w-full">
                 <h3 className="text-lg md:text-xl font-semibold mb-3 md:mb-4">
                   Try these suggestions:
