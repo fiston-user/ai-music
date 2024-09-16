@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import PlaylistResult from "@/components/PlaylistResult";
 import { Loader2, Music } from "lucide-react";
 import { NeonGradientCard } from "@/components/magicui/neon-gradient-card";
+import { FaGithub } from "react-icons/fa";
 
 interface Song {
   name: string;
@@ -100,6 +101,14 @@ export default function Home() {
           <Music className="w-6 h-6 text-green-500" />
           <span className="text-xl font-bold">AI Playlist Generator</span>
         </div>
+        <a
+          href="https://github.com/fiston-user/ai-music"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-green-500 hover:text-green-400 transition-colors duration-200"
+        >
+          <FaGithub className="w-6 h-6" />
+        </a>
       </header>
 
       <main className="flex flex-col items-center justify-center px-4 py-10 md:py-20 text-center">
