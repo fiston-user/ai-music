@@ -13,6 +13,7 @@ interface Song {
   year?: string;
   genres?: string[];
   explanation?: string;
+  spotifyId?: string;
 }
 
 interface PlaylistResultProps {
@@ -23,6 +24,7 @@ export default function PlaylistResult({ playlist }: PlaylistResultProps) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
 
   const copyToClipboard = (text: string, index?: number) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -45,6 +47,49 @@ export default function PlaylistResult({ playlist }: PlaylistResultProps) {
 
   const toggleExpand = (index: number) => {
     setExpandedIndex(expandedIndex === index ? null : index);
+  };
+
+  const createSpotifyPlaylist = async () => {
+    setCreatingPlaylist(true);
+    try {
+      const accessToken = localStorage.getItem("spotifyAccessToken");
+      const tokenExpiry = localStorage.getItem("spotifyTokenExpiry");
+
+      if (!accessToken || !tokenExpiry || Date.now() > parseInt(tokenExpiry)) {
+        // Token is missing or expired, redirect to auth
+        window.location.href = "/api/spotify/auth";
+        return;
+      }
+
+      const response = await fetch("/api/spotify/create-playlist", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accessToken,
+          playlistName: "AI Generated Playlist",
+          tracks: playlist
+            .map((song) =>
+              song.spotifyId ? `spotify:track:${song.spotifyId}` : null
+            )
+            .filter(Boolean),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert("Playlist created successfully!");
+      } else {
+        throw new Error(data.error || "Failed to create playlist");
+      }
+    } catch (error) {
+      console.error("Error creating Spotify playlist:", error);
+      alert("Failed to create Spotify playlist. Please try again.");
+    } finally {
+      setCreatingPlaylist(false);
+    }
   };
 
   return (
@@ -73,7 +118,10 @@ export default function PlaylistResult({ playlist }: PlaylistResultProps) {
         <ScrollArea className="h-[400px] pr-4">
           <ul className="space-y-4">
             {playlist.map((song, index) => (
-              <li key={index} className="bg-[#0a2a0a] rounded-lg border-2 border-green-700 p-3 shadow">
+              <li
+                key={index}
+                className="bg-[#0a2a0a] rounded-lg border-2 border-green-700 p-3 shadow"
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div>
@@ -139,6 +187,15 @@ export default function PlaylistResult({ playlist }: PlaylistResultProps) {
             ))}
           </ul>
         </ScrollArea>
+        <Button
+          onClick={createSpotifyPlaylist}
+          disabled={creatingPlaylist}
+          className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white"
+        >
+          {creatingPlaylist
+            ? "Creating Playlist..."
+            : "Create Spotify Playlist"}
+        </Button>
       </CardContent>
     </Card>
   );

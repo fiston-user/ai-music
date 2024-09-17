@@ -10,17 +10,85 @@ interface Song {
   year?: string;
   genres?: string[];
   explanation?: string;
+  spotifyId?: string;
 }
 
 const MAX_RETRIES = 2;
 const TIMEOUT = 50000; // 50 seconds
 
+async function getSpotifyAccessToken(): Promise<string | null> {
+  const basic = Buffer.from(
+    `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+  ).toString("base64");
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+    }),
+  });
+
+  if (!response.ok) {
+    console.error("Failed to get Spotify access token");
+    return null;
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+async function searchSpotifyTrack(song: Song): Promise<string | undefined> {
+  const accessToken = await getSpotifyAccessToken();
+  if (!accessToken) {
+    console.error("Failed to get Spotify access token");
+    return undefined;
+  }
+
+  const query = `${song.name} ${song.artist}`;
+  const encodedQuery = encodeURIComponent(query);
+  const url = `https://api.spotify.com/v1/search?q=${encodedQuery}&type=track&limit=1`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Spotify API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (data.tracks.items.length > 0) {
+      return data.tracks.items[0].id;
+    }
+  } catch (error) {
+    console.error("Error searching Spotify:", error);
+  }
+
+  return undefined;
+}
+
 export async function POST(request: Request) {
   let retries = 0;
+  let requestBody;
+
+  try {
+    requestBody = await request.json();
+  } catch (error) {
+    return Response.json(
+      { error: "Invalid JSON in request body" },
+      { status: 400 }
+    );
+  }
 
   while (retries <= MAX_RETRIES) {
     try {
-      const { song } = await request.json();
+      const { song } = requestBody;
 
       if (!song || typeof song !== "string") {
         return Response.json({ error: "Invalid song input" }, { status: 400 });
@@ -34,7 +102,7 @@ export async function POST(request: Request) {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-      const prompt = `Generate a curated playlist of 5 songs similar to "${song}". For each song, provide:
+      const prompt = `Generate a curated playlist of 10 songs similar to "${song}". For each song, provide:
 
 1. Song title
 2. Artist name
@@ -63,21 +131,31 @@ Ensure a diverse selection within the similarity criteria, including both well-k
 
       let playlist: Song[];
       try {
+        // Attempt to parse the entire array
         playlist = JSON.parse(`[${cleanedResponse}]`);
       } catch (parseError) {
         console.error("JSON parsing failed:", parseError);
+        // If parsing fails, try to parse each object separately
         const lines = cleanedResponse.split("\n");
-        playlist = lines.map((line) => {
+        playlist = lines.flatMap((line) => {
           try {
-            return JSON.parse(line);
-          } catch {
-            return { name: "Unknown", artist: "Unknown" };
+            const parsedLine = JSON.parse(line);
+            if (typeof parsedLine === "object" && parsedLine !== null) {
+              return [parsedLine];
+            }
+          } catch (lineError) {
+            console.error("Error parsing line:", lineError);
           }
+          return [];
         });
       }
 
+      if (!Array.isArray(playlist) || playlist.length === 0) {
+        throw new Error("Failed to generate a valid playlist");
+      }
+
       playlist = playlist
-        .filter((song) => song && typeof song === "object")
+        .filter((song): song is Song => song && typeof song === "object")
         .map((song) => ({
           name: song.name || "Unknown",
           artist: song.artist || "Unknown",
@@ -88,11 +166,19 @@ Ensure a diverse selection within the similarity criteria, including both well-k
         }));
 
       if (playlist.length === 0) {
-        throw new Error("Failed to generate a valid playlist");
+        throw new Error("Failed to generate a valid playlist after filtering");
       }
 
-      return Response.json({ playlist });
-    } catch (error) {
+      // After generating and parsing the playlist, add Spotify track IDs
+      const playlistWithSpotifyIds = await Promise.all(
+        playlist.map(async (song) => {
+          const spotifyId = await searchSpotifyTrack(song);
+          return { ...song, spotifyId };
+        })
+      );
+
+      return Response.json({ playlist: playlistWithSpotifyIds });
+    } catch (error: unknown) {
       console.error(
         `Error in generate-playlist route (attempt ${retries + 1}):`,
         error
@@ -101,10 +187,16 @@ Ensure a diverse selection within the similarity criteria, including both well-k
 
       if (retries > MAX_RETRIES) {
         return Response.json(
-          { error: "Failed to generate playlist after multiple attempts" },
+          {
+            error: "Failed to generate playlist after multiple attempts",
+            details: error instanceof Error ? error.message : String(error),
+          },
           { status: 500 }
         );
       }
     }
   }
+
+  // This should never be reached, but TypeScript requires a return statement
+  return Response.json({ error: "Unexpected error occurred" }, { status: 500 });
 }
